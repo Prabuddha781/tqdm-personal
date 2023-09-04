@@ -7,12 +7,15 @@ Usage:
 >>> for i in trange(10):
 ...     ...
 """
+import asyncio
+import json
+import math
 import sys
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from numbers import Number
-from time import time
+from time import time, perf_counter
 from warnings import warn
 from weakref import WeakSet
 
@@ -463,11 +466,11 @@ class tqdm(Comparable):
             last_len[0] = len_s
 
         return print_status
-
+        
     @staticmethod
     def format_meter(n, total, elapsed, ncols=None, prefix='', ascii=False, unit='it',
                      unit_scale=False, rate=None, bar_format=None, postfix=None,
-                     unit_divisor=1000, initial=0, colour=None, **extra_kwargs):
+                     unit_divisor=1000, initial=0, colour=None, ws=None, **extra_kwargs):
         """
         Return a string-based progress bar given some parameters
 
@@ -614,7 +617,11 @@ class tqdm(Comparable):
             # fractional and percentage progress
             frac = n / total
             percentage = frac * 100
-
+            
+            if ws != None:
+                redis_client, uuid = ws
+                redis_client.set(uuid, f"{ math.floor(percentage) }")
+                print("\n", redis_client.get(uuid), math.floor(percentage))
             l_bar += '{0:3.0f}%|'.format(percentage)
 
             if ncols == 0:
@@ -643,6 +650,7 @@ class tqdm(Comparable):
             if not _is_ascii(full_bar.charset) and _is_ascii(bar_format):
                 bar_format = str(bar_format)
             res = bar_format.format(bar=full_bar, **format_dict)
+            # res = "" # remove this to start showing results
             return disp_trim(res, ncols) if ncols else res
 
         elif bar_format:
@@ -657,11 +665,13 @@ class tqdm(Comparable):
                            max(1, ncols - disp_len(nobar)) if ncols else 10,
                            charset=Bar.BLANK, colour=colour)
             res = bar_format.format(bar=full_bar, **format_dict)
+            # res = ""
             return disp_trim(res, ncols) if ncols else res
         else:
             # no total: no progressbar, ETA, just progress stats
             return (f'{(prefix + ": ") if prefix else ""}'
                     f'{n_fmt}{unit} [{elapsed_str}, {rate_fmt}{postfix}]')
+            # pass
 
     def __new__(cls, *_, **__):
         instance = object.__new__(cls)
@@ -722,8 +732,9 @@ class tqdm(Comparable):
         fp = file if file is not None else sys.stdout
         with cls.external_write_mode(file=file, nolock=nolock):
             # Write the message
-            fp.write(s)
-            fp.write(end)
+            # fp.write(s)
+            # fp.write(end)
+            pass
 
     @classmethod
     @contextmanager
@@ -953,11 +964,11 @@ class tqdm(Comparable):
     @envwrap("TQDM_", is_method=True, types={'total': float, 'ncols': int, 'miniters': float,
                                              'position': int, 'nrows': int})
     def __init__(self, iterable=None, desc=None, total=None, leave=True, file=None,
-                 ncols=None, mininterval=0.1, maxinterval=10.0, miniters=None,
+                 ncols=None, mininterval=3, maxinterval=10.0, miniters=None,
                  ascii=None, disable=False, unit='it', unit_scale=False,
                  dynamic_ncols=False, smoothing=0.3, bar_format=None, initial=0,
                  position=None, postfix=None, unit_divisor=1000, write_bytes=False,
-                 lock_args=None, nrows=None, colour=None, delay=0.0, gui=False,
+                 lock_args=None, nrows=None, colour=None, delay=0.0, gui=False, ws=None,
                  **kwargs):
         """see tqdm.tqdm for arguments"""
         if file is None:
@@ -1076,6 +1087,8 @@ class tqdm(Comparable):
         self.postfix = None
         self.colour = colour
         self._time = time
+        self.ws = ws
+        
         if postfix:
             try:
                 self.set_postfix(refresh=False, **postfix)
@@ -1460,7 +1473,7 @@ class tqdm(Comparable):
             'rate': self._ema_dn() / self._ema_dt() if self._ema_dt() else None,
             'bar_format': self.bar_format, 'postfix': self.postfix,
             'unit_divisor': self.unit_divisor, 'initial': self.initial,
-            'colour': self.colour}
+            'colour': self.colour, "ws": self.ws}
 
     def display(self, msg=None, pos=None):
         """
